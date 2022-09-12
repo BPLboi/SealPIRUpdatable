@@ -36,7 +36,10 @@ public:
   void simple_set(std::uint64_t index, seal::Plaintext pt);
   seal::Ciphertext simple_query(std::uint64_t index);
   void set_one_ct(seal::Ciphertext one);
-
+  
+  //----------------------------NEW STUFF:-------------------------------------------------
+  void update(PirQuery query, PirReply &reply, std::uint64_t index, seal::Plaintext pt, uint32_t client_id);
+  
 private:
   seal::EncryptionParameters enc_params_; // SEAL parameters
   PirParams pir_params_;                  // PIR parameters
@@ -52,4 +55,7 @@ private:
 
   void multiply_power_of_X(const seal::Ciphertext &encrypted,
                            seal::Ciphertext &destination, std::uint32_t index);
+  
+  //-----------------------NEW STUFF-----------------------------     
+  seal::Ciphertext get_partial_expansion_d1(PirQuery query, uint64_t index,uint32_t client_id);
 };
