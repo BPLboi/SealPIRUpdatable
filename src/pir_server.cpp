@@ -15,6 +15,7 @@ PIRServer::PIRServer(const EncryptionParameters &enc_params,
 }
 
 void PIRServer::preprocess_database() {
+  //cout << "Databse size at start: " << db_->size() << endl;
   if (!is_db_preprocessed_) {
 
     for (uint32_t i = 0; i < db_->size(); i++) {
@@ -24,6 +25,7 @@ void PIRServer::preprocess_database() {
 
     is_db_preprocessed_ = true;
   }
+  //cout << "Databse size at end: " << db_->size() << endl;
 }
 
 // Server takes over ownership of db and will free it when it exits
@@ -214,6 +216,7 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
           std::make_move_iterator(expanded_query_part.end()));
       expanded_query_part.clear();
     }
+    
     cout << "Server: expansion done " << endl;
     if (expanded_query.size() != n_i) {
       cout << " size mismatch!!! " << expanded_query.size() << ", " << n_i
@@ -232,6 +235,8 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
                                              context_->first_parms_id());
       }
     }
+    
+    cout << "Database size: " << (*cur).size() << endl;
 
     for (uint64_t k = 0; k < product; k++) {
       if ((*cur)[k].is_zero()) {
@@ -243,7 +248,8 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
 
     vector<Ciphertext> intermediateCtxts(product);
     Ciphertext temp;
-
+    cout << "Expanded Query Size: " << expanded_query.size() << endl;
+    cout << "Product: " << product << endl;
     for (uint64_t k = 0; k < product; k++) {
 
       evaluator_->multiply_plain(expanded_query[0], (*cur)[k],
@@ -263,6 +269,8 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
       // cout << "const term of ctxt " << jj << " = " <<
       // intermediateCtxts[jj][0] << endl;
     }
+    
+    cout << "Intermediate ciphertext size: " << intermediateCtxts.size();
 
     if (i == nvec.size() - 1) {
       return intermediateCtxts;
@@ -304,6 +312,7 @@ inline vector<Ciphertext> PIRServer::expand_query(const Ciphertext &encrypted,
                                                   uint32_t m,
                                                   uint32_t client_id) {
 
+  //cout << "m is: " << m << endl;
   GaloisKeys &galkey = galoisKeys_[client_id];
 
   // Assume that m is a power of 2. If not, round it to the next power of 2.
@@ -439,4 +448,137 @@ Ciphertext PIRServer::simple_query(uint64_t index) {
 void PIRServer::set_one_ct(Ciphertext one) {
   one_ = one;
   evaluator_->transform_to_ntt_inplace(one_);
+}
+
+void PIRServer::update(PirQuery query, PirReply &reply, std::uint64_t index, Plaintext new_pt, uint32_t client_id){
+  uint32_t dbIdx = index/pir_params_.elements_per_plaintext + 1;
+  //Get current element from database
+  Plaintext dbElem = (*db_)[dbIdx];
+  
+  //Get the proper thing to multiply elements by
+  //Ciphertext mult_by = get_partial_expansion_d1(query, dbIdx, client_id);
+  Ciphertext mult_by = expand_query(query[0][0],pir_params_.nvec[0],client_id)[dbIdx];
+  evaluator_->transform_to_ntt_inplace(mult_by);
+  
+  
+  //From the reply, subtract old value * multiplicator and add new value * multiplicator
+  
+  Ciphertext old_mult;
+  Ciphertext old_mult_sub;
+  evaluator_->multiply_plain(mult_by,dbElem,old_mult);
+  
+  uint64_t x = -1;
+  cout << "zero" << endl;
+  Plaintext neg_one(seal::util::uint_to_hex_string(&x, std::size_t(1)));
+  cout << "one" << endl;
+  evaluator_->transform_to_ntt_inplace(neg_one,context_->first_parms_id());
+  cout << "two" << endl;
+  evaluator_->multiply_plain(old_mult,neg_one,old_mult_sub);
+  cout << "three" << endl;
+  
+  Ciphertext new_mult;
+  evaluator_->multiply_plain(mult_by,new_pt,new_mult);
+  
+  evaluator_->transform_to_ntt_inplace(reply[0]);
+  evaluator_->add_inplace(reply[0],old_mult_sub);
+  evaluator_->add_inplace(reply[0],new_mult);
+  evaluator_->transform_from_ntt_inplace(reply[0]);
+}
+
+Ciphertext PIRServer::get_partial_expansion_d1(PirQuery query, uint64_t idx, uint32_t client_id){ //only works when d=1
+  uint64_t m = pir_params_.nvec[0];//need to actually get the right value here
+  cout << "m: " << m <<endl;
+  GaloisKeys &galkey = galoisKeys_[client_id];
+
+  // Assume that m is a power of 2. If not, round it to the next power of 2.
+  uint32_t logm = ceil(log2(m));
+  Plaintext two("2");
+
+  vector<int> galois_elts;
+  auto n = enc_params_.poly_modulus_degree();
+  if (logm > ceil(log2(n))) {
+    throw logic_error("m > n is not allowed.");
+  }
+  
+  cout << "n: " << n << " , ceil(log2(n)): "<< ceil(log2(n)) << endl;
+  for (int i = 0; i < ceil(log2(n)); i++) {
+    galois_elts.push_back((n + exponentiate_uint(2, i)) /
+                          exponentiate_uint(2, i));
+  }
+  
+  Ciphertext temp = query[0][0];
+  Ciphertext tempctxt;
+  Ciphertext tempctxt_rotated;
+  Ciphertext tempctxt_shifted;
+  Ciphertext tempctxt_rotatedshifted;
+  uint64_t temp_idx = idx;
+  
+  
+  for (uint32_t i = 0; i < logm - 1; i++) {
+    Ciphertext newtemp;
+    // temp[a] = (j0 = a (mod 2**i) ? ) : Enc(x^{j0 - a}) else Enc(0).  With
+    // some scaling....
+    int index_raw = (n << 1) - (1 << i);
+    int index = (index_raw * galois_elts[i]) % (n << 1);
+
+    //for (uint32_t a = 0; a < temp.size(); a++) {
+    int b = temp_idx%2;
+    if(b == 0){
+      evaluator_->apply_galois(temp, galois_elts[i], galkey,
+                               tempctxt_rotated);
+
+      // cout << "rotate " <<
+      // client.decryptor_->invariant_noise_budget(tempctxt_rotated) << ", ";
+
+      evaluator_->add(temp, tempctxt_rotated, newtemp);
+      multiply_power_of_X(temp, tempctxt_shifted, index_raw); // this line might have to go in next if-statement
+    }else{
+      // cout << "mul by x^pow: " <<
+      // client.decryptor_->invariant_noise_budget(tempctxt_shifted) << ", ";
+
+      multiply_power_of_X(tempctxt_rotated, tempctxt_rotatedshifted, index);
+
+      // cout << "mul by x^pow: " <<
+      // client.decryptor_->invariant_noise_budget(tempctxt_rotatedshifted) <<
+      // ", ";
+
+      // Enc(2^i x^j) if j = 0 (mod 2**i).
+      evaluator_->add(tempctxt_shifted, tempctxt_rotatedshifted,
+                      newtemp); //c'_(k+2j)
+    //}
+    }
+    temp_idx = temp_idx/2;
+    temp = newtemp;
+    /*
+    cout << "end: ";
+    for (int h = 0; h < temp.size();h++){
+        cout << client.decryptor_->invariant_noise_budget(temp[h]) << ", ";
+    }
+    cout << endl;
+   */ 
+  }
+  // Last step of the loop
+  Ciphertext newtemp;
+  int index_raw = (n << 1) - (1 << (logm - 1));
+  int index = (index_raw * galois_elts[logm - 1]) % (n << 1);
+  if (idx >= (m - (1 << (logm - 1)))) { // corner case.
+    evaluator_->multiply_plain(temp, two,
+                               newtemp); // plain multiplication by 2.
+    // cout << client.decryptor_->invariant_noise_budget(newtemp[a]) << ", ";
+  } else {
+    cout << "temp_idx at last loop step: " << temp_idx << endl;
+    if(temp_idx%2 == 0){
+      evaluator_->apply_galois(temp, galois_elts[logm - 1], galkey,
+                               tempctxt_rotated);
+      evaluator_->add(temp, tempctxt_rotated, newtemp);
+      multiply_power_of_X(temp, tempctxt_shifted, index_raw);
+    }else{
+      multiply_power_of_X(tempctxt_rotated, tempctxt_rotatedshifted, index);
+      evaluator_->add(tempctxt_shifted, tempctxt_rotatedshifted,
+                      newtemp);
+    }                
+  }
+
+ 
+  return newtemp;
 }
