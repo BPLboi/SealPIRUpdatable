@@ -56,6 +56,10 @@ int main(int argc, char *argv[]) {
   
   for(int i = 0; i< numTrials; i++){
     assert(query_test_w_update(databaseSize, 288, 4096, 20, 1) == 0);
+    cout << "Average update time: " << sumAllTimes(trialNum)/numUpdates/checks << " us" << endl;
+    cout << "Standard deviation: " << allResultsSTDEV(trialNum) << " us" << endl;
+    printWhiskerPlot(trialNum);
+    trialNum++;
   }
 }
 
@@ -93,10 +97,10 @@ void printWhiskerPlot(int trialNum){
   
   cout << "Whisker plot (min-q1-median-q2-max): " << min << "--"<< q1 << "--" << median
    	<< "--" << q3 << "--" << max<< "(us)" << endl; 
-  //cout << "Multiplied by num of batches: " << min*trialsToDo[trialNum]/1000 << "--"<<
- // 	 q1*trialsToDo[batchNum]/1000 << "--" << median*trialsToDo[trialNum]/1000 << "--"
- // 	 << q3*trialsToDo[batchNum]/1000 << "--" << max*trialsToDo[trialNum]/1000 <<
- // 	 "(ms)" << endl;
+  //cout << "Multiplied by num of batches: " << min*trialsToDo[trialNum] << "--"<<
+ // 	 q1*trialsToDo[batchNum] << "--" << median*trialsToDo[trialNum] << "--"
+ // 	 << q3*trialsToDo[batchNum] << "--" << max*trialsToDo[trialNum] <<
+ // 	 " us" << endl;
 }
 
 uint64_t sumAllTimes(int trialNum){
@@ -215,10 +219,9 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
   auto time_pre_e = high_resolution_clock::now();
   auto time_pre_us =
       duration_cast<microseconds>(time_pre_e - time_pre_s).count();
+  cout << "Database preprocess time: " << time_pre_us << endl;
   
-  auto total_time_query_us = 0;
-  auto total_time_server_us = 0;
-  auto total_time_decode_us = 0;
+  
   //Create a query for every single check
   uint64_t indexes[checks];
   uint64_t offsets[checks];
@@ -295,12 +298,15 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
       // changes database copy
       db_copy.get()[(changeIdx * size_per_item) + j] = val;
     }
-    //need to change this to use text vector instead of a random number
     
     Plaintext pt = server.changed_db_at_idx(move(newDbEntry),changeIdx,size_per_item);
     for(int i = 0; i< checks; i++){
       Plaintext ptCopy = pt;
+      auto time_pre_update = high_resolution_clock::now();
       server.update(queries[i], replies[i], changeIdx, ptCopy,0);
+      auto time_post_update = high_resolution_clock::now();
+      allResults[trialNum][c*checks + i] =
+          duration_cast<microseconds>(time_pre_update - time_post_update).count();
       dec_replies[i] = client.decode_reply(replies[i], offsets[i]);
     }
     
@@ -326,55 +332,6 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
       }
     }
   }
- 
   
-  // Measure query processing (including expansion)
-  //auto time_server_s = high_resolution_clock::now();
-  //PirReply reply = server.generate_reply(query, 0);
-  //auto time_server_e = high_resolution_clock::now();
-  //auto time_server_us =bool correct_elem(vector<uint8_t> dec_reply, int index)
-  //duration_cast<microseconds>(time_server_e - time_server_s).count();
-  
-  // Measure response extraction
-  //auto time_decode_s = chrono::high_resolution_clock::now();
-  //vector<uint8_t> elems = client.decode_reply(reply, offset);
-  //auto time_decode_e = chrono::high_resolution_clock::now();
-  //auto time_decode_us =
-  //duration_cast<microseconds>(time_decode_e - time_decode_s).count();
-  
-  //assert(elems.size() == size_per_item);
-
-  //bool failed = false;
-  // Check that we retrieved the correct element
-  //for (uint32_t i = 0; i < size_per_item; i++) {
-  //  if (elems[i] != db_copy.get()[(ele_index * size_per_item) + i]) {
-      //cout << "Main: elems " << (int)elems[i] << ", db "
-      //     << (int)db_copy.get()[(ele_index * size_per_item) + i] << endl;
-      //cout << "Main: PIR result wrong at " << i << endl;
-  //    failed = true;
-  //  }
-  //}
-  //if (failed) {
-  //  return -1;
- // }
-  
-  //--------------------------Updates and re-checking:---------------------------
-
-  // add times to total time
-  //total_time_query_us += time_query_us;
-  //total_time_server_us += time_server_us;
-  //total_time_decode_us += time_decode_us;
-
-  // Output results
-  //cout << "Main: PIR result correct!" << endl;
-  //cout << "Main: PIRServer pre-processing time: " << time_pre_us / 1000 << " ms"
-  //     << endl;
-  //cout << "Main: PIRClient query generation time: " << total_time_query_us/
-  //	trialsPerDatabase / 1000 << " ms" << endl;
-  //cout << "Main: PIRServer reply generation time: " << total_time_server_us/
-  //	trialsPerDatabase / 1000 << " ms" << endl;
-  //cout << "Main: PIRClient answer decode time: " << total_time_decode_us/
-  //	trialsPerDatabase / 1000<< " ms" << endl;
-  //cout << "Main: Reply num ciphertexts: " << reply.size() << endl;
   return 0;
 }
