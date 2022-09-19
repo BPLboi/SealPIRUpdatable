@@ -29,6 +29,7 @@ static const int numTrials = 1; //number of times all of this will be re-run
 //--------------------------------------------------------------------------------------
 int checkIdxs[checks];
 int allResults[numTrials][numUpdates*checks];
+int trialNum = 0;
 
 int main(int argc, char *argv[]) {
   //(query_test(1 << 20, 288, 4096, 20, 2) == 0); 
@@ -59,7 +60,7 @@ int main(int argc, char *argv[]) {
 }
 
 void printWhiskerPlot(int trialNum){
-  int n = numUpdates; // stores number of elements in the array
+  int n = numUpdates*checks; // stores number of elements in the array
   	// to make things easier to type
   sort(allResults[trialNum],allResults[trialNum] + n);
   
@@ -99,27 +100,29 @@ void printWhiskerPlot(int trialNum){
 }
 
 uint64_t sumAllTimes(int trialNum){
+  int n = numUpdates*checks;
   uint64_t sum = 0;
-  for(int i = 0; i< numUpdates; i++){
+  for(int i = 0; i< n; i++){
       sum += allResults[trialNum][i];
   }
   return sum;
 }
 
 double allResultsSTDEV(int trialNum){
+  int n = numUpdates*checks;
   double sum = 0;
-  for(int i = 0; i< numUpdates; i++){
+  for(int i = 0; i< n; i++){
       sum += allResults[trialNum][i];
   }
 
-  double average = sum/numUpdates;
+  double average = sum/n;
   double sumSqDiff = 0;
   
-  for(int i = 0; i< numUpdates; i++){
+  for(int i = 0; i< n; i++){
       sumSqDiff += (allResults[trialNum][i] - average)*(allResults[trialNum][i] - average);
   }
   
-  double ans = sqrt(sumSqDiff/(numUpdates - 1));
+  double ans = sqrt(sumSqDiff/(n - 1));
   
   return ans;
 }
