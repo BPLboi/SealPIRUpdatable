@@ -23,13 +23,12 @@ void printWhiskerPlot(int trialNum);
 // --------------------------------VARIABLES TO CHANGE------------------------------------
 static const int databaseSize = 1<< 16; 
 static const int checks = 5; // number of database indexes for which the answer will be re-computed each time and re-checked
-static const int numUpdates = 5; //number of times a database entry will be updated. half of these will be on random database entries that should cause no chantge, half will be on one of the database indexes that are being changed
+static const int numUpdates = 4; //number of times a database entry will be updated. half of these will be on random database entries that should cause no chantge, half will be on one of the database indexes that are being changed
 static const int numTrials = 1; //number of times all of this will be re-run
 
 //--------------------------------------------------------------------------------------
 int checkIdxs[checks];
-int allResults[numTrials][numUpdates];
-
+int allResults[numTrials][numUpdates*checks];
 
 int main(int argc, char *argv[]) {
   //(query_test(1 << 20, 288, 4096, 20, 2) == 0); 
@@ -141,7 +140,7 @@ int getNonCheck(){
 }
 
 int getCheck(){
-  return rand()%checks;
+  return checkIdxs[rand()%checks];
 }
 
 int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
@@ -283,28 +282,30 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
       cout << "Changing non-check" <<endl;
       changeIdx = getNonCheck();
     }
+    cout << "Change idx: " << changeIdx <<  endl;
     
+    auto newDbEntry(make_unique<uint8_t[]>(size_per_item));
     vector<uint8_t> text;
     for (uint64_t j = 0; j < size_per_item; j++) {
       uint8_t val = rd() % 256;
-      text.push_back(val);
-      // changes database copybool correct_elem(vector<uint8_t> dec_reply, int index)
+      newDbEntry.get()[j] = val;
+      // changes database copy
       db_copy.get()[(changeIdx * size_per_item) + j] = val;
     }
     //need to change this to use text vector instead of a random number
-    uint64_t x = rand()%(1<<20);
-    Plaintext pt(seal::util::uint_to_hex_string(&x, std::size_t(1)));
     
+    Plaintext pt = server.changed_db_at_idx(move(newDbEntry),changeIdx,size_per_item);
     for(int i = 0; i< checks; i++){
-      server.update(queries[i], replies[i], changeIdx, pt,0);
+      Plaintext ptCopy = pt;
+      server.update(queries[i], replies[i], changeIdx, ptCopy,0);
       dec_replies[i] = client.decode_reply(replies[i], offsets[i]);
     }
     
-    server.simple_set(changeIdx,pt);
-    
+    server.simple_set(changeIdx/pir_params.elements_per_plaintext,pt);
     
     for(int j = 0; j< checks; j++){
       bool failed = false;
+      
       if(dec_replies[j].size() != size_per_item){
         failed = true;
         cout << "Wrong size" << endl;
@@ -315,9 +316,9 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
           failed = true;
         }
       }
-    
+      
       if(failed){
-        cout << "Failed on the " << c<< "th update, changed the " << changeIdx<< "th change index, and failed on the " << j <<"th check." << endl;
+        cout << "Failed on the " << c<< "th update, changed the " << changeIdx<< "th index, and failed on the " << j <<"th check." << endl;
         return -1;
       }
     }
