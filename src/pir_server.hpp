@@ -13,7 +13,8 @@ public:
 
   // NOTE: server takes over ownership of db and frees it when it exits.
   // Caller cannot free db
-  void set_database(std::unique_ptr<std::vector<seal::Plaintext>> &&db);
+  void set_database(std::unique_ptr<std::vector<seal::Plaintext>> &&db,
+         std::unique_ptr<std::vector<seal::Plaintext>> &&db_non_ntt); // changed from default to also set the non ntt database
   void set_database(const std::unique_ptr<const std::uint8_t[]> &bytes,
                     std::uint64_t ele_num, std::uint64_t ele_size);
   void preprocess_database();
@@ -38,7 +39,9 @@ public:
   void set_one_ct(seal::Ciphertext one);
   
   //----------------------------NEW STUFF:-------------------------------------------------
+  seal::Plaintext changed_db_at_idx(const std::unique_ptr<const uint8_t[]> &bytes, std::uint64_t index, std::uint64_t ele_size);
   void update(PirQuery query, PirReply &reply, std::uint64_t index, seal::Plaintext pt, uint32_t client_id);
+  
   
 private:
   seal::EncryptionParameters enc_params_; // SEAL parameters
@@ -56,6 +59,7 @@ private:
   void multiply_power_of_X(const seal::Ciphertext &encrypted,
                            seal::Ciphertext &destination, std::uint32_t index);
   
-  //-----------------------NEW STUFF-----------------------------     
+  //-----------------------NEW STUFF-----------------------------
+  std::unique_ptr<Database> non_ntt_db_;
   seal::Ciphertext get_partial_expansion_d1(PirQuery query, uint64_t index,uint32_t client_id);
 };
