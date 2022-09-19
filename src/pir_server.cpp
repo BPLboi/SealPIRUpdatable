@@ -29,12 +29,15 @@ void PIRServer::preprocess_database() {
 }
 
 // Server takes over ownership of db and will free it when it exits
-void PIRServer::set_database(unique_ptr<vector<Plaintext>> &&db) {
+void PIRServer::set_database(unique_ptr<vector<Plaintext>> &&db, unique_ptr<vector<Plaintext>> &&db_non_ntt) {
   if (!db) {
     throw invalid_argument("db cannot be null");
   }
 
   db_ = move(db);
+  non_ntt_db_ = move(db_non_ntt);
+  
+  cout << "Other db size: " << non_ntt_db_->size() << endl;
   is_db_preprocessed_ = false;
 }
 
@@ -46,7 +49,11 @@ void PIRServer::set_database(const std::unique_ptr<const uint8_t[]> &bytes,
 
   // number of FV plaintexts needed to represent all elements
   uint64_t num_of_plaintexts = pir_params_.num_of_plaintexts;
-
+  
+  
+  //cout << "Num of plaintexts:" <<num_of_plaintexts << endl;
+  //cout << "Elements per plaintext" << pir_params_.elements_per_plaintext << endl;
+  
   // number of FV plaintexts needed to create the d-dimensional matrix
   uint64_t prod = 1;
   for (uint32_t i = 0; i < pir_params_.nvec.size(); i++) {
@@ -57,7 +64,9 @@ void PIRServer::set_database(const std::unique_ptr<const uint8_t[]> &bytes,
   assert(num_of_plaintexts <= matrix_plaintexts);
 
   auto result = make_unique<vector<Plaintext>>();
+  auto result_for_non_ntt = make_unique<vector<Plaintext>>();
   result->reserve(matrix_plaintexts);
+  result_for_non_ntt->reserve(matrix_plaintexts);
 
   uint64_t ele_per_ptxt = pir_params_.elements_per_plaintext;
   uint64_t bytes_per_ptxt = ele_per_ptxt * ele_size;
@@ -90,14 +99,41 @@ void PIRServer::set_database(const std::unique_ptr<const uint8_t[]> &bytes,
 
     // Get the coefficients of the elements that will be packed in plaintext i
     vector<uint64_t> coefficients(coeff_per_ptxt);
+    //vector<uint64_t> ele_copy;
     for (uint64_t ele = 0; ele < ele_in_chunk; ele++) {
       vector<uint64_t> element_coeffs = bytes_to_coeffs(
           logt, bytes.get() + offset + (ele_size * ele), ele_size);
       std::copy(element_coeffs.begin(), element_coeffs.end(),
                 coefficients.begin() +
                     (coefficients_per_element(logt, ele_size) * ele));
+      
+      
+      //if(ele == 5){
+      //   ele_copy= element_coeffs;
+      //}
     }
-
+    
+    
+    /*
+    bool poggywoggy = true;
+    
+    for(int ind = 0; ind< ele_copy.size(); ind++){
+      int ind2 = ind + coefficients_per_element(logt,ele_size)*5;
+      if(ele_copy[ind] != coefficients[ind2]){
+        cout << "Not poggers: " << ele_copy[ind] << " , " << coefficients[ind2]<< endl;
+        poggywoggy = false;
+      } 
+      
+    }
+    
+    if(i <= 100){
+      cout << "Size: " << ele_copy.size() << " , "<< bytes_per_ptxt/ele_per_ptxt/8 << endl;
+      cout << coefficients.size()/ele_copy.size() << endl;
+    }
+    if(poggywoggy && i <= 100) cout <<"Everything is very poggers" << endl;
+    */
+    
+    //cout << "Offset: " << offset << " , ele_in_chunk:"<< ele_in_chunk<< endl;
     offset += process_bytes;
 
     uint64_t used = coefficients.size();
@@ -111,14 +147,18 @@ void PIRServer::set_database(const std::unique_ptr<const uint8_t[]> &bytes,
 
     Plaintext plain;
     encoder_->encode(coefficients, plain);
+    Plaintext plain2 = plain;
+    
     // cout << i << "-th encoded plaintext = " << plain.to_string() << endl;
     result->push_back(move(plain));
+    result_for_non_ntt->push_back(move(plain2));
   }
 
   // Add padding to make database a matrix
   uint64_t current_plaintexts = result->size();
   assert(current_plaintexts <= num_of_plaintexts);
-
+  uint64_t curr_non_ntt_plaintexts = result_for_non_ntt->size();
+  assert(curr_non_ntt_plaintexts <= num_of_plaintexts);
 #ifdef DEBUG
   cout << "adding: " << matrix_plaintexts - current_plaintexts
        << " FV plaintexts of padding (equivalent to: "
@@ -133,9 +173,13 @@ void PIRServer::set_database(const std::unique_ptr<const uint8_t[]> &bytes,
     Plaintext plain;
     vector_to_plaintext(padding, plain);
     result->push_back(plain);
+    result_for_non_ntt->push_back(plain);
   }
+  
+  
+  Plaintext checker = (*result_for_non_ntt)[0];
 
-  set_database(move(result));
+  set_database(move(result),move(result_for_non_ntt));
 }
 
 void PIRServer::set_galois_key(uint32_t client_id, seal::GaloisKeys galkey) {
@@ -430,6 +474,7 @@ inline void PIRServer::multiply_power_of_X(const Ciphertext &encrypted,
 }
 
 void PIRServer::simple_set(uint64_t index, Plaintext pt) {
+  non_ntt_db_->operator[](index) = pt;
   if (is_db_preprocessed_) {
     evaluator_->transform_to_ntt_inplace(pt, context_->first_parms_id());
   }
@@ -450,10 +495,57 @@ void PIRServer::set_one_ct(Ciphertext one) {
   evaluator_->transform_to_ntt_inplace(one_);
 }
 
+Plaintext PIRServer::changed_db_at_idx(const std::unique_ptr<const uint8_t[]> &bytes, uint64_t index, uint64_t ele_size){
+  uint32_t logt = floor(log2(enc_params_.plain_modulus().value()));
+  //uint32_t N = enc_params_.poly_modulus_degree();
+  uint64_t ele_per_ptxt = pir_params_.elements_per_plaintext;
+  //uint64_t coeff_per_ptxt =
+  //    ele_per_ptxt * coefficients_per_element(logt, ele_size);
+  uint64_t coeffs_per_elem = coefficients_per_element(logt,ele_size);
+  
+  
+  uint64_t dbIdx = index/ele_per_ptxt;
+  uint64_t inDbIdx = index%ele_per_ptxt;
+  vector<uint64_t> coeffs;
+  
+  Plaintext curr = (*non_ntt_db_)[dbIdx];
+  
+  //evaluator_->transform_from_ntt_inplace(curr)
+  encoder_->decode(curr,coeffs);
+  //coeffs to change
+  vector<uint64_t> element_coeffs = bytes_to_coeffs(
+          logt, bytes.get(), ele_size);
+  
+  //change appropriate coefficients
+  for(int i = 0; i< coeffs_per_elem; i++){
+    uint64_t coeffs_idx = i + inDbIdx*coeffs_per_elem;
+    coeffs[coeffs_idx] = element_coeffs[i];
+  }
+  
+  encoder_->encode(coeffs,curr);
+  
+  return move(curr);
+/*
+1) Get database index of plaintext that will be changed
+2) Calculate which position you need to change
+
+3,4)
+Option 1:
+Expand out database element at particular index, change where you need to, then compress
+
+Option 2:
+Make a plaintext with old db elem at that location, make one with new db elem,
+then subtract old and add new (would require storing a non-plaintext version of the db
+so that we can get old db elem without having to un-compress current db)
+
+*/
+}
+
 void PIRServer::update(PirQuery query, PirReply &reply, std::uint64_t index, Plaintext new_pt, uint32_t client_id){
-  uint32_t dbIdx = index/pir_params_.elements_per_plaintext + 1;
+  uint32_t dbIdx = index/pir_params_.elements_per_plaintext;
+  
   //Get current element from database
-  Plaintext dbElem = (*db_)[dbIdx];
+  Plaintext dbElem = (*db_)[dbIdx]; 
   
   //Get the proper thing to multiply elements by
   //Ciphertext mult_by = get_partial_expansion_d1(query, dbIdx, client_id);
@@ -464,23 +556,24 @@ void PIRServer::update(PirQuery query, PirReply &reply, std::uint64_t index, Pla
   //From the reply, subtract old value * multiplicator and add new value * multiplicator
   
   Ciphertext old_mult;
-  Ciphertext old_mult_sub;
+  
+  //For now, we just assume the db is preprocessed
+  //if(!is_db_preprocessed){
+  //  evaluator_->trnsform_to_ntt_inplace(dbElem,context_->first_params_id());
+  //}
+  
   evaluator_->multiply_plain(mult_by,dbElem,old_mult);
   
-  uint64_t x = -1;
-  cout << "zero" << endl;
-  Plaintext neg_one(seal::util::uint_to_hex_string(&x, std::size_t(1)));
-  cout << "one" << endl;
-  evaluator_->transform_to_ntt_inplace(neg_one,context_->first_parms_id());
-  cout << "two" << endl;
-  evaluator_->multiply_plain(old_mult,neg_one,old_mult_sub);
-  cout << "three" << endl;
+  evaluator_->transform_to_ntt_inplace(new_pt, context_->first_parms_id());
   
   Ciphertext new_mult;
+  //cout << "zero" << endl;
   evaluator_->multiply_plain(mult_by,new_pt,new_mult);
-  
+  //cout << "one" << endl;
   evaluator_->transform_to_ntt_inplace(reply[0]);
-  evaluator_->add_inplace(reply[0],old_mult_sub);
+  
+  evaluator_->sub_inplace(reply[0],old_mult);
+  //cout << "two" << endl;
   evaluator_->add_inplace(reply[0],new_mult);
   evaluator_->transform_from_ntt_inplace(reply[0]);
 }
@@ -489,7 +582,7 @@ Ciphertext PIRServer::get_partial_expansion_d1(PirQuery query, uint64_t idx, uin
   uint64_t m = pir_params_.nvec[0];//need to actually get the right value here
   cout << "m: " << m <<endl;
   GaloisKeys &galkey = galoisKeys_[client_id];
-
+																																																																																												
   // Assume that m is a power of 2. If not, round it to the next power of 2.
   uint32_t logm = ceil(log2(m));
   Plaintext two("2");
@@ -523,16 +616,16 @@ Ciphertext PIRServer::get_partial_expansion_d1(PirQuery query, uint64_t idx, uin
 
     //for (uint32_t a = 0; a < temp.size(); a++) {
     int b = temp_idx%2;
-    if(b == 0){
-      evaluator_->apply_galois(temp, galois_elts[i], galkey,
+    evaluator_->apply_galois(temp, galois_elts[i], galkey,
                                tempctxt_rotated);
-
+    if(b == 0){
       // cout << "rotate " <<
       // client.decryptor_->invariant_noise_budget(tempctxt_rotated) << ", ";
 
       evaluator_->add(temp, tempctxt_rotated, newtemp);
-      multiply_power_of_X(temp, tempctxt_shifted, index_raw); // this line might have to go in next if-statement
+      
     }else{
+      multiply_power_of_X(temp, tempctxt_shifted, index_raw); // this line might have to go in prev  if-statement
       // cout << "mul by x^pow: " <<
       // client.decryptor_->invariant_noise_budget(tempctxt_shifted) << ", ";
 
