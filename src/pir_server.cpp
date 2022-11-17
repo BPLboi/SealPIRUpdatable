@@ -77,9 +77,9 @@ void PIRServer::set_database(const std::unique_ptr<const uint8_t[]> &bytes,
       ele_per_ptxt * coefficients_per_element(logt, ele_size);
   assert(coeff_per_ptxt <= N);
 
-  cout << "Elements per plaintext: " << ele_per_ptxt << endl;
-  cout << "Coeff per ptxt: " << coeff_per_ptxt << endl;
-  cout << "Bytes per plaintext: " << bytes_per_ptxt << endl;
+  //cout << "Elements per plaintext: " << ele_per_ptxt << endl;
+  //cout << "Coeff per ptxt: " << coeff_per_ptxt << endl;
+  //cout << "Bytes per plaintext: " << bytes_per_ptxt << endl;
 
   uint32_t offset = 0;
 
@@ -238,22 +238,25 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
 
   int logt = floor(log2(enc_params_.plain_modulus().value()));
 
-  for (uint32_t i = 0; i < nvec.size(); i++) {
-    cout << "Server: " << i + 1 << "-th recursion level started " << endl;
+
+  //cout << "nvec size: " << nvec.size(); 
+  for (uint32_t i = 0; i < nvec.size(); i++) { // only 1 dimension for us, so this only runs once
+    //cout << "Server: " << i + 1 << "-th recursion level started " << endl;
 
     vector<Ciphertext> expanded_query;
 
     uint64_t n_i = nvec[i];
-    cout << "Server: n_i = " << n_i << endl;
-    cout << "Server: expanding " << query[i].size() << " query ctxts" << endl;
+    //cout << "Server: n_i = " << n_i << endl;
+    //cout << "Server: expanding " << query[i].size() << " query ctxts" << endl;
     for (uint32_t j = 0; j < query[i].size(); j++) {
       uint64_t total = N;
       if (j == query[i].size() - 1) {
         total = n_i % N;
-      }
-      cout << "-- expanding one query ctxt into " << total << " ctxts " << endl;
+        //cout <<"total: " <<  total << " , n_i: " << n_i <<  " , N: " << N << endl; 
+      } // so after this, total = nvec[0]%poly_modulus_degree
+      //cout << "-- expanding one query ctxt into " << total << " ctxts " << endl;
       vector<Ciphertext> expanded_query_part =
-          expand_query(query[i][j], total, client_id);
+          expand_query(query[i][j], total, client_id); // here, m = total
       expanded_query.insert(
           expanded_query.end(),
           std::make_move_iterator(expanded_query_part.begin()),
@@ -261,7 +264,7 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
       expanded_query_part.clear();
     }
     
-    cout << "Server: expansion done " << endl;
+    //cout << "Server: expansion done " << endl;
     if (expanded_query.size() != n_i) {
       cout << " size mismatch!!! " << expanded_query.size() << ", " << n_i
            << endl;
@@ -280,7 +283,7 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
       }
     }
     
-    cout << "Database size: " << (*cur).size() << endl;
+    //cout << "Database size: " << (*cur).size() << endl;
 
     for (uint64_t k = 0; k < product; k++) {
       if ((*cur)[k].is_zero()) {
@@ -292,8 +295,8 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
 
     vector<Ciphertext> intermediateCtxts(product);
     Ciphertext temp;
-    cout << "Expanded Query Size: " << expanded_query.size() << endl;
-    cout << "Product: " << product << endl;
+    //cout << "Expanded Query Size: " << expanded_query.size() << endl;
+    //cout << "Product: " << product << endl;
     for (uint64_t k = 0; k < product; k++) {
 
       evaluator_->multiply_plain(expanded_query[0], (*cur)[k],
@@ -314,7 +317,7 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
       // intermediateCtxts[jj][0] << endl;
     }
     
-    cout << "Intermediate ciphertext size: " << intermediateCtxts.size();
+    //cout << "Intermediate ciphertext size: " << intermediateCtxts.size();
 
     if (i == nvec.size() - 1) {
       return intermediateCtxts;
@@ -342,8 +345,8 @@ PirReply PIRServer::generate_reply(PirQuery &query, uint32_t client_id) {
       }
       product = intermediate_plain.size(); // multiply by expansion rate.
     }
-    cout << "Server: " << i + 1 << "-th recursion level finished " << endl;
-    cout << endl;
+    //cout << "Server: " << i + 1 << "-th recursion level finished " << endl;
+    //cout << endl;
   }
   cout << "reply generated!  " << endl;
   // This should never get here
@@ -356,13 +359,12 @@ inline vector<Ciphertext> PIRServer::expand_query(const Ciphertext &encrypted,
                                                   uint32_t m,
                                                   uint32_t client_id) {
 
-  //cout << "m is: " << m << endl;
+  cout << "m is: " << m << endl;
   GaloisKeys &galkey = galoisKeys_[client_id];
 
   // Assume that m is a power of 2. If not, round it to the next power of 2.
   uint32_t logm = ceil(log2(m));
   Plaintext two("2");
-
   vector<int> galois_elts;
   auto n = enc_params_.poly_modulus_degree();
   if (logm > ceil(log2(n))) {
@@ -420,6 +422,7 @@ inline vector<Ciphertext> PIRServer::expand_query(const Ciphertext &encrypted,
     cout << endl;
     */
   }
+
   // Last step of the loop
   vector<Ciphertext> newtemp(temp.size() << 1);
   int index_raw = (n << 1) - (1 << (logm - 1));
@@ -443,7 +446,6 @@ inline vector<Ciphertext> PIRServer::expand_query(const Ciphertext &encrypted,
   vector<Ciphertext>::const_iterator first = newtemp.begin();
   vector<Ciphertext>::const_iterator last = newtemp.begin() + m;
   vector<Ciphertext> newVec(first, last);
-
   return newVec;
 }
 
@@ -478,6 +480,7 @@ void PIRServer::simple_set(uint64_t index, Plaintext pt) {
   if (is_db_preprocessed_) {
     evaluator_->transform_to_ntt_inplace(pt, context_->first_parms_id());
   }
+  cout << index << endl;
   db_->operator[](index) = pt;
 }
 
@@ -541,17 +544,26 @@ so that we can get old db elem without having to un-compress current db)
 */
 }
 
-void PIRServer::update(PirQuery query, PirReply &reply, std::uint64_t index, Plaintext new_pt, uint32_t client_id){
+void PIRServer::update(PirQuery &query, PirReply &reply, std::uint64_t index, Plaintext new_pt, uint32_t client_id){
   uint32_t dbIdx = index/pir_params_.elements_per_plaintext;
   
   //Get current element from database
   Plaintext dbElem = (*db_)[dbIdx]; 
+
+  //Get the proper thing to multiply elements by (need to change second index of query depending on size of query)
   
-  //Get the proper thing to multiply elements by
-  Ciphertext mult_by = get_partial_expansion_d1(query, dbIdx, client_id);
-  //Ciphertext mult_by = expand_query(query[0][0],pir_params_.nvec[0],client_id)[dbIdx];
+  uint32_t dbIdx_expand = dbIdx%enc_params_.poly_modulus_degree();
+  uint32_t query_idx =  dbIdx/enc_params_.poly_modulus_degree();
+  uint64_t m = enc_params_.poly_modulus_degree();
+  if(query_idx == query[0].size() -1) m = pir_params_.nvec[0]%enc_params_.poly_modulus_degree();
+  Ciphertext mult_by = get_partial_expansion_d1(query[0][query_idx],m , dbIdx_expand, client_id);
+  // cout << m << endl;
+  // vector<Ciphertext> expanded_query = expand_query(query[0][0],m,client_id);
+  // cout << "Expanded query size: " <<  expanded_query.size() << "db index is: " << dbIdx << endl;
+  // Ciphertext mult_by = expanded_query[dbIdx];
+  // problem is that when we take m mod db_elem, we get a vector of a size smaller than dbIdx ...
   evaluator_->transform_to_ntt_inplace(mult_by);
-  
+  cout << "size of mult by: " << sizeof(mult_by) << endl;
   
   //From the reply, subtract old value * multiplicator and add new value * multiplicator
   
@@ -578,9 +590,7 @@ void PIRServer::update(PirQuery query, PirReply &reply, std::uint64_t index, Pla
   evaluator_->transform_from_ntt_inplace(reply[0]);
 }
 
-Ciphertext PIRServer::get_partial_expansion_d1(PirQuery query, uint64_t idx, uint32_t client_id){ //only works when d=1
-  uint64_t m = pir_params_.nvec[0];//need to actually get the right value here
-  //cout << "m: " << m <<endl;
+Ciphertext PIRServer::get_partial_expansion_d1(const Ciphertext &orig,uint64_t m, uint64_t idx, uint32_t client_id){ //only works when d=1
   GaloisKeys &galkey = galoisKeys_[client_id];
 																																																																																												
   // Assume that m is a power of 2. If not, round it to the next power of 2.
@@ -600,7 +610,7 @@ Ciphertext PIRServer::get_partial_expansion_d1(PirQuery query, uint64_t idx, uin
                           exponentiate_uint(2, i));
   }
   
-  Ciphertext temp = query[0][0];
+  Ciphertext temp = orig;
   Ciphertext tempctxt;
   Ciphertext tempctxt_rotated;
   Ciphertext tempctxt_shifted;

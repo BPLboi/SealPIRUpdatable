@@ -21,14 +21,14 @@ uint64_t sumAllTimes (int trialNum);
 double allResultsSTDEV(int trialNum);
 void printWhiskerPlot(int trialNum);
 // --------------------------------VARIABLES TO CHANGE------------------------------------
-static const int databaseSize = 1<< 16; 
-static const int checks = 5; // number of database indexes for which the answer will be re-computed each time and re-checked
+static const int databaseSize = 1<< 15; 
+static const int checks = 2; // number of database indexes for which the answer will be re-computed each time and re-checked
 static const int numUpdates = 4; //number of times a database entry will be updated. half of these will be on random database entries that should cause no chantge, half will be on one of the database indexes that are being changed
 static const int numTrials = 1; //number of times all of this will be re-run
 
 //--------------------------------------------------------------------------------------
-int checkIdxs[checks];
-int allResults[numTrials][numUpdates*checks];
+uint64_t checkIdxs[checks];
+uint64_t allResults[numTrials][numUpdates*checks];
 int trialNum = 0;
 
 int main(int argc, char *argv[]) {
@@ -51,11 +51,11 @@ int main(int argc, char *argv[]) {
   }
   
   for(int i = 0; i< checks; i++){
-    cout << checkIdxs[i] << endl;
+    cout << "Check idx " << i+1 <<": " <<checkIdxs[i] << endl;
   }
   
   for(int i = 0; i< numTrials; i++){
-    assert(query_test_w_update(databaseSize, 288, 4096, 20, 1) == 0);
+    assert(query_test_w_update(databaseSize, 2000, 4096, 20, 1) == 0);
     cout << "Average update time: " << sumAllTimes(trialNum)/numUpdates/checks << " us" << endl;
     cout << "Standard deviation: " << allResultsSTDEV(trialNum) << " us" << endl;
     printWhiskerPlot(trialNum);
@@ -219,7 +219,7 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
   auto time_pre_e = high_resolution_clock::now();
   auto time_pre_us =
       duration_cast<microseconds>(time_pre_e - time_pre_s).count();
-  cout << "Database preprocess time: " << time_pre_us << endl;
+  cout << "Database preprocess time: " << time_pre_us << " us" << endl;
   
   
   //Create a query for every single check
@@ -231,8 +231,10 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
     indexes[i] = client.get_fv_index(checkIdxs[i]);
     offsets[i] = client.get_fv_offset(checkIdxs[i]);
     queries[i] = client.generate_query(indexes[i]);
-    cout <<"Query size: " <<  queries[i].size() << endl;
+    cout <<"Query size in bytes: " <<  sizeof(queries[i][0][0]) + sizeof(queries[i][0][1]) << endl;
   }
+
+
   
   //Old code for a single index:
   //uint64_t ele_index =
@@ -260,10 +262,19 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
   vector<uint8_t> dec_replies[checks];
   
   for(int j = 0; j< checks; j++){
+    auto time_pre_q = high_resolution_clock::now();
     replies[j] = server.generate_reply(queries[j],0);
-    cout << "Reply size: " << replies[j].size() << endl;
+    auto time_post_q = high_resolution_clock::now();
+    auto init_query_time =
+      duration_cast<microseconds>(time_post_q - time_pre_q).count();
+    cout << "Initial query time: " << init_query_time << endl;
+    cout << "Response size in bytes: " << sizeof(replies[j][0]) << endl;
+    //cout << "Reply size: " << replies[j][0].size() << endl;
+    
     dec_replies[j] = client.decode_reply(replies[j], offsets[j]);
-    cout << "Decoded Reply size: " << replies[j].size() << endl;
+    
+    
+    //cout << "Decoded Reply size: " << replies[j].size() << endl;
     assert(dec_replies[j].size() == size_per_item);
     
     bool failed = false;
@@ -281,7 +292,7 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
   
   for(int c = 0; c < numUpdates; c++){
     uint64_t changeIdx = 0;
-    if(rand()%2 == 0){
+    if(true){ //change to rand()%2 == 0 for a chance of not updating anything
       cout << "Changing check idx" << endl;
       changeIdx = getCheck();
     }else{
@@ -292,21 +303,28 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
     
     auto newDbEntry(make_unique<uint8_t[]>(size_per_item));
     vector<uint8_t> text;
+    
     for (uint64_t j = 0; j < size_per_item; j++) {
       uint8_t val = rd() % 256;
       newDbEntry.get()[j] = val;
       // changes database copy
       db_copy.get()[(changeIdx * size_per_item) + j] = val;
     }
+
+   
     
     Plaintext pt = server.changed_db_at_idx(move(newDbEntry),changeIdx,size_per_item);
+    
     for(int i = 0; i< checks; i++){
       Plaintext ptCopy = pt;
       auto time_pre_update = high_resolution_clock::now();
+      
       server.update(queries[i], replies[i], changeIdx, ptCopy,0);
+      
       auto time_post_update = high_resolution_clock::now();
       allResults[trialNum][c*checks + i] =
-          duration_cast<microseconds>(time_pre_update - time_post_update).count();
+          duration_cast<microseconds>(time_post_update - time_pre_update).count();
+      //cout << allResults[trialNum][c*checks+i] << endl;
       dec_replies[i] = client.decode_reply(replies[i], offsets[i]);
     }
     
@@ -327,7 +345,7 @@ int query_test_w_update(uint64_t num_items, uint64_t item_size, uint32_t degree,
       }
       
       if(failed){
-        cout << "Failed on the " << c<< "th update, changed the " << changeIdx<< "th index, and failed on the " << j <<"th check." << endl;
+        cout << "Failed on the " << c+1<< "th update, changed the " << changeIdx<< "th index, and failed on the " << j+1 <<"th check." << endl;
         return -1;
       }
     }

@@ -40,7 +40,7 @@ public:
   
   //----------------------------NEW STUFF:-------------------------------------------------
   seal::Plaintext changed_db_at_idx(const std::unique_ptr<const uint8_t[]> &bytes, std::uint64_t index, std::uint64_t ele_size);
-  void update(PirQuery query, PirReply &reply, std::uint64_t index, seal::Plaintext pt, uint32_t client_id);
+  void update(PirQuery &query, PirReply &reply, std::uint64_t index, seal::Plaintext pt, uint32_t client_id);
   
   
 private:
@@ -61,5 +61,5 @@ private:
   
   //-----------------------NEW STUFF-----------------------------
   std::unique_ptr<Database> non_ntt_db_;
-  seal::Ciphertext get_partial_expansion_d1(PirQuery query, uint64_t index,uint32_t client_id);
+  seal::Ciphertext get_partial_expansion_d1(const seal::Ciphertext &orig,std::uint64_t m, uint64_t index,uint32_t client_id);
 };
