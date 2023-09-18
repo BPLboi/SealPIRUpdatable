@@ -1,8 +1,12 @@
 include_directories (${SealPIR_SOURCE_DIR}/src)
 
-add_executable(query_test3 query_test3.cpp)
-target_link_libraries(query_test3 sealpir)
-add_test(NAME query_test3 COMMAND query_test3)
+add_executable(query_test4 query_test4.cpp)
+target_link_libraries(query_test4 sealpir)
+add_test(NAME query_test4 COMMAND query_test4)
+
+# add_executable(query_test3 query_test3.cpp)
+# target_link_libraries(query_test3 sealpir)
+# add_test(NAME query_test3 COMMAND query_test3)
 
 #add_executable(query_test2 query_test2.cpp)
 #target_link_libraries(query_test2 sealpir)
